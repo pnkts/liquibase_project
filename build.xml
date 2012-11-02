@@ -1,0 +1,137 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project name="migration">
+	<property name="lib.dir" value="lib" />
+	<property name="changeLog.dir" value="changelog" />
+	<property name="changeLog.docDir" value="build" />
+    <property name="changeLogFile" value="changelog/master.xml" />
+
+    <path id="depend.classpath">
+        <fileset dir="${lib.dir}">
+            <include name="**/*.*"/>
+        </fileset>
+    </path>
+	
+    <taskdef resource="liquibasetasks.properties">
+        <classpath refid="depend.classpath" />
+    </taskdef>
+
+    <target name="db:prepare">
+        <script language="javascript"><![CDATA[
+            importClass(java.lang.System);
+            importClass(java.io.File);
+            var file = new File("liquibase.properties");
+            if (!file.exists()) {
+                project.executeTarget("db:changePropertiesFile");
+            }
+        ]]>
+        </script>
+        <property file="liquibase.properties" />
+    </target>
+
+    <target name="db:changePropertiesFile">
+        <input message="input config type >" addproperty="propertiesFile"/>
+        <script language="javascript"><![CDATA[
+            importClass(java.lang.System);
+            importClass(java.io.File);
+            var file_path = "dbconfig/" + project.getProperty("propertiesFile") + ".properties";
+            var copy_file = new File("liquibase.properties");
+            var file = new File(file_path);
+            if (file.exists()) {
+                project.copyFile(file, copy_file, false, true);
+            } else {
+                project.setProperty("javascript.fail.message", "not exists file:"+file_path);
+            }
+        ]]>
+        </script>
+        <fail if="javascript.fail.message" message="${javascript.fail.message}" />
+    </target>
+
+    <target name="db:setChangeLogName">
+        <input
+            message="チェンジログの名前 >"
+            addproperty="changeLog.generateParameter"
+        />
+        <script language="javascript"><![CDATA[
+            importClass(java.lang.System);
+            var dir = project.getProperty("changeLog.dir");
+            var name = project.getProperty("changeLog.generateParameter");
+            var now = new Date();
+            var filename = [now.getFullYear(),
+                ("0"+(now.getMonth() + 1)).slice(-2),
+                ("0"+now.getDate()).slice(-2),
+                ("0"+now.getHours()).slice(-2),
+                ("0"+now.getMinutes()).slice(-2),
+                ("0"+now.getSeconds()).slice(-2), "_"].join("");
+            project.setProperty("changeLog.generateFilename", filename + name + ".xml");
+        ]]>
+        </script>
+    </target>
+
+	<target name="db:makeChangeLogFile" depends="db:setChangeLogName">
+		<touch file="${changeLog.dir}/${changeLog.generateFilename}"/>
+		<echo file="${changeLog.dir}/${changeLog.generateFilename}"><![CDATA[<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<databaseChangeLog xmlns="http://www.liquibase.org/xml/ns/dbchangelog" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-2.0.xsd">
+</databaseChangeLog>]]>
+		</echo>
+		<property name="changeLog.include" value="    &lt;include file=&quot;${changeLog.dir}\/${changeLog.generateFilename}&quot; \/&gt;" />
+		<property name="changeLog.replaceToken" value="&lt;\/databaseChangeLog&gt;" />
+		<exec executable="sed" output="${changeLogFile}">
+			<arg value="s/${changeLog.replaceToken}/${changeLog.include}\&#x0a;${changeLog.replaceToken}/g" />
+			<arg value="${changeLogFile}" />
+		</exec>
+	</target>
+
+	<target name="db:diffChangeLog" depends="db:prepare,db:setChangeLogName">
+	    <input message="比較元のURL >" addproperty="base.url"/>
+	    <input message="比較元のデータベース名前" addproperty="base.db_name"/>
+	    <input message="比較元のユーザ >" addproperty="base.username"/>
+	    <input message="比較元のPassword >" addproperty="base.password"/>
+	    <diffDatabaseToChangeLog
+	        outputFile="${changeLog.dir}/${changeLog.generateFilename}"
+	        driver="${driver}" url="${url}" username="${username}" password="${password}"
+	        referenceUrl="jdbc:mysql://${base.url}/${base.db_name}" referenceUsername="${base.username}"
+	        referencePassword="${base.password}"
+	        classpathref="depend.classpath"/>
+	    <property name="changeLog.include" value="    &lt;include file=&quot;${changeLog.dir}\/${changeLog.generateFilename}&quot; \/&gt;" />
+	    <property name="changeLog.replaceToken" value="&lt;\/databaseChangeLog&gt;" />
+	    <exec executable="sed" output="${changeLogFile}">
+	        <arg value="s/${changeLog.replaceToken}/${changeLog.include}\&#x0a;${changeLog.replaceToken}/g" />
+	        <arg value="${changeLogFile}" />
+	    </exec>
+    </target>
+
+    <target name="db:generateChangeLog" depends="db:prepare,db:setChangeLogName">
+        <generateChangeLog
+            outputFile="${changeLog.dir}/${changeLog.generateFilename}"
+            driver="${driver}" url="${url}"
+            username="${username}" password="${password}"
+            classpathref="depend.classpath"/>
+    </target>
+  
+    <target name="db:changeLogSync" depends="db:prepare">
+        <changeLogSync
+            changeLogFile="${changeLogFile}"
+            driver="${driver}" url="${url}"
+            username="${username}" password="${password}"
+            classpathref="depend.classpath"/>
+    </target>
+
+    <target name="db:update" depends="db:prepare">
+        <updateDatabase
+            changeLogFile="${changeLogFile}"
+            driver="${driver}" url="${url}"
+            username="${username}"
+            password="${password}"
+            promptOnNonLocalDatabase="true"
+            classpathref="depend.classpath"/>
+    </target>
+
+    <target name="db:generateDocument" depends="db:prepare">
+    	<delete dir="${changeLog.docDir}" />
+    	<mkdir dir="${changeLog.docDir}" />
+    	<exec executable="./liquibase" >
+    		<arg line="--changeLogFile=${changeLogFile} dbDoc ${changeLog.docDir}"/>
+    	</exec>
+	</target>
+
+</project>
